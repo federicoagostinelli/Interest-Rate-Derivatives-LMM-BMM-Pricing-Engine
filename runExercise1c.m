@@ -1,0 +1,186 @@
+function results = runExercise1c( ...
+    curveDatesSet, curveRatesSet, volsLmmBase, marketBaseLmm, ...
+    productBase, productContract, upfrontForRisk, useSmileCorrectionForRisk)
+%RUNEXERCISE1C Run parallel and bucket DV01 analysis.
+%
+%   results = runExercise1c( ...
+%       curveDatesSet, curveRatesSet, volsLmmBase, marketBaseLmm, ...
+%       productBase, productContract, upfrontForRisk, useSmileCorrectionForRisk)
+%
+%   computes the Exercise 1c rate sensitivities:
+%
+%       1. parallel DV01;
+%       2. bucket DV01.
+%
+%   For each sensitivity, two versions are computed:
+%
+%       fair-upfront case
+%           Uses upfrontForRisk.
+%
+%       zero-upfront case
+%           Uses zero upfront, to verify that the fixed upfront amount has
+%           no rate sensitivity.
+%
+%   The pricing convention is selected by useSmileCorrectionForRisk:
+%
+%       true
+%           Use smile-corrected Party B pricing.
+%
+%       false
+%           Use uncorrected Black-76 Party B pricing.
+%
+%   DV01 convention:
+%
+%       A +0.1 bp shock is used for numerical differentiation, and results
+%       are normalized to EUR / bp.
+%
+%   INPUTS:
+%       curveDatesSet
+%           Bootstrap instrument dates.
+%
+%       curveRatesSet
+%           Bootstrap market quotes.
+%
+%       volsLmmBase
+%           Base calibrated LMM volatility matrix in decimal units.
+%
+%       marketBaseLmm
+%           Base market struct.
+%
+%       productBase
+%           Product struct prepared on marketBaseLmm.
+%
+%       productContract
+%           Contractual product struct, not yet prepared on shocked markets.
+%
+%       upfrontForRisk
+%           Upfront percentage used for the fair-upfront risk run.
+%
+%       useSmileCorrectionForRisk
+%           Logical flag selecting corrected or uncorrected Party B pricing.
+%
+%   OUTPUT:
+%       results
+%           Struct containing:
+%
+%               dv01Shock
+%               oneBp
+%               scaleDV01
+%               parallelFair
+%               parallelZero
+%               bucketFair
+%               bucketZero
+
+    if nargin < 7 || isempty(upfrontForRisk)
+        upfrontForRisk = 0.0;
+    end
+
+    if nargin < 8 || isempty(useSmileCorrectionForRisk)
+        useSmileCorrectionForRisk = true;
+    end
+
+    fprintf('\n');
+    fprintf('============================================================\n');
+    fprintf(' Exercise 1c - Parallel and Bucket DV01\n');
+    fprintf('============================================================\n');
+
+    %% Shock convention
+
+    dv01Shock = 1.0e-5;   % 0.1 bp
+    oneBp = 1.0e-4;       % 1 bp
+    scaleDV01 = oneBp / dv01Shock;
+
+    %% Parallel DV01
+
+    [datesUp, discountsUp, zeroRatesUp] = bootstrapShocked( ...
+        curveDatesSet, ...
+        curveRatesSet, ...
+        dv01Shock);
+
+    parallelFairRaw = computeDV01Parallel( ...
+        datesUp, ...
+        discountsUp, ...
+        zeroRatesUp, ...
+        volsLmmBase, ...
+        marketBaseLmm, ...
+        productBase, ...
+        productContract, ...
+        upfrontForRisk, ...
+        useSmileCorrectionForRisk);
+
+    parallelZeroRaw = computeDV01Parallel( ...
+        datesUp, ...
+        discountsUp, ...
+        zeroRatesUp, ...
+        volsLmmBase, ...
+        marketBaseLmm, ...
+        productBase, ...
+        productContract, ...
+        0.0, ...
+        useSmileCorrectionForRisk);
+
+    parallelFair = normalizeParallelDV01( ...
+        parallelFairRaw, ...
+        dv01Shock, ...
+        scaleDV01);
+
+    parallelZero = normalizeParallelDV01( ...
+        parallelZeroRaw, ...
+        dv01Shock, ...
+        scaleDV01);
+
+    diagnosticsDV01Parallel( ...
+        parallelFair, ...
+        parallelZero, ...
+        parallelFair);
+
+    %% Bucket DV01
+
+    bucketFair = computeDV01Bucket( ...
+        curveDatesSet, ...
+        curveRatesSet, ...
+        volsLmmBase, ...
+        marketBaseLmm, ...
+        productBase, ...
+        productContract, ...
+        upfrontForRisk, ...
+        dv01Shock, ...
+        useSmileCorrectionForRisk);
+
+    bucketZero = computeDV01Bucket( ...
+        curveDatesSet, ...
+        curveRatesSet, ...
+        volsLmmBase, ...
+        marketBaseLmm, ...
+        productBase, ...
+        productContract, ...
+        0.0, ...
+        dv01Shock, ...
+        useSmileCorrectionForRisk);
+
+    diagnosticsDV01Bucket( ...
+        bucketFair, ...
+        bucketZero);
+
+    diagnosticsDV01BucketVsParallel( ...
+        parallelFair, ...
+        bucketFair);
+
+    %% Store results
+
+    results = struct();
+
+    results.dv01Shock = dv01Shock;
+    results.oneBp = oneBp;
+    results.scaleDV01 = scaleDV01;
+
+    results.useSmileCorrection = useSmileCorrectionForRisk;
+    results.upfrontForRisk = upfrontForRisk;
+
+    results.parallelFair = parallelFair;
+    results.parallelZero = parallelZero;
+
+    results.bucketFair = bucketFair;
+    results.bucketZero = bucketZero;
+
+end
